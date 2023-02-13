@@ -34,7 +34,7 @@ class azurecost:
     def get_retail_rate(self, armskuname: str, armregionname: str, spot: bool):
 
         params = {}
-        filters = f"armRegionName eq {armregionname} and armSkuName eq {armskuname} and serviceName eq 'Virtual Machines'"
+        filters = f"armRegionName eq '{armregionname}' and armSkuName eq '{armskuname}' and serviceName eq 'Virtual Machines'"
         params['$filter'] = filters
 
         res = self.retail_session.get(self.retail_url, params=params)
