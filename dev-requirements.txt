@@ -13,5 +13,3 @@ jsonpickle==1.4.1
 gnureadline
 requests-cache
 jinja2
-azure-core
-azure-identity
