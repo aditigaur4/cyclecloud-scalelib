@@ -1,4 +1,5 @@
 # test: ignore
+import glob
 import os
 import shutil
 import sys
@@ -12,6 +13,9 @@ from setuptools.command.test import test as TestCommand  # noqa: N812
 import inspect
 
 __version__ = "1.0.0"
+
+SWAGGER_URL = "https://oss.sonatype.org/content/repositories/releases/io/swagger/swagger-codegen-cli/2.2.1/swagger-codegen-cli-2.2.1.jar"
+SWAGGER_CLI = SWAGGER_URL.split("/")[-1]
 
 
 class PyTest(TestCommand):
@@ -267,6 +271,31 @@ class TypeChecking(Command):
         run_type_checking()
 
 
+class Swagger(Command):
+    user_options: List[str] = []
+
+    def initialize_options(self) -> None:
+        pass
+
+    def finalize_options(self) -> None:
+        pass
+
+    def run(self) -> None:
+        if not os.path.exists(".tools"):
+            os.makedirs(".tools")
+        
+        if not os.path.exists(f".tools/{SWAGGER_CLI}"):
+            check_call(["wget", SWAGGER_URL], cwd=".tools")
+        
+        check_call(["java", "-jar", f"../.tools/{SWAGGER_CLI}", "generate", "-i", "../swagger/Clusters.json", "-l", "python"], cwd="clusters")
+        check_call([sys.executable, "setup.py", "sdist"], cwd="clusters")
+        for fil in glob.glob("clusters/dist/*.gz"):
+            dest = os.path.join("dist", os.path.basename(fil))
+            if os.path.exists(dest):
+                os.remove(dest)
+            shutil.move(fil, dest)
+
+
 setup(
     name="cyclecloud-scalelib",
     version=__version__,
@@ -287,6 +316,7 @@ setup(
     cmdclass={
         "test": PyTest,
         "docs": AutoDoc,
+        "swagger": Swagger,
         "format": Formatter,
         "types": TypeChecking,
         "commithook": PreCommitHook,

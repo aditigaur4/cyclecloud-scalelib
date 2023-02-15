@@ -103,7 +103,6 @@ try:
     def _unlock(lockfp: TextIO) -> None:
         pass
 
-
 except ModuleNotFoundError:
     import msvcrt
 
