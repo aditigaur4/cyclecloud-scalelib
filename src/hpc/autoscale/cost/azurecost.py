@@ -128,5 +128,3 @@ class azurecost:
                     e['vm_sizes'][htc]['region'] = 'eastus'
 
         return usage
-
-
