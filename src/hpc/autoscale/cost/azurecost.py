@@ -1,8 +1,10 @@
 import ast
+import copy
+import requests
 import hpc.autoscale.hpclogging as log
 from collections import namedtuple
 from requests_cache import CachedSession
-import warnings
+
 import logging
 
 class azurecost:
@@ -83,3 +85,48 @@ class azurecost:
             if e[sku] and e[region]:
                 sku_list.append((e[sku],e[region]))
         return sku_list
+
+    def get_usage(self, clustername: str, start: str, end: str):
+
+        endpoint = f"{self.config['url']}/clusters/{clustername}/usage"
+        params = {}
+        params['granularity'] = 'total'
+        params['timeframe'] = 'custom'
+        params['from'] = start
+        params['to'] = end
+        uname = self.config['username']
+        pw = self.config['password']
+        res = requests.get(url=endpoint, params=params, auth=(uname,pw), verify=False)
+        if res.status_code != 200:
+            log.error(res.reason)
+            res.raise_for_status()
+
+        usage = copy.deepcopy(res.json())
+
+        hpc = 'Standard_F2s_v2'
+        hpc_cores = 2
+        htc = 'Standard_F2s_v2'
+        htc_cores = 2
+        #This is a temporary hack to work around CC api for now.
+        for e in usage['usage'][0]['breakdown']:
+            if e['category'] == 'nodearray':
+                if e['node'] == 'hpc':
+                    use = e['hours']
+                    if 'vm_sizes' not in e:
+                        e['vm_sizes'] = {}
+                    e['vm_sizes'][hpc] = {}
+                    e['vm_sizes'][hpc]['core_hours'] = use
+                    e['vm_sizes'][hpc]['core_count'] = hpc_cores
+                    e['vm_sizes'][hpc]['region'] = 'eastus'
+                elif e['node'] == 'htc':
+                    use = e['hours']
+                    if 'vm_sizes' not in e:
+                        e['vm_sizes'] = {}
+                    e['vm_sizes'][htc] = {}
+                    e['vm_sizes'][htc]['core_hours'] = use
+                    e['vm_sizes'][htc]['core_count'] = htc_cores
+                    e['vm_sizes'][htc]['region'] = 'eastus'
+
+        return usage
+
+
