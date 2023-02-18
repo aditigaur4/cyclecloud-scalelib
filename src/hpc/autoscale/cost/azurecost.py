@@ -12,17 +12,9 @@ class azurecost:
 
         self.config = config
         self.base_url = "https://management.azure.com"
-        self.subscription = config['accounting']['subscription_id']
-        self.scope = f"subscriptions/{self.subscription}"
-        self.query_url = f"https://management.azure.com/{self.scope}/providers/Microsoft.CostManagement/query?api-version=2021-10-01"
         self.retail_url = "https://prices.azure.com/api/retail/prices?api-version=2021-10-01-preview&meterRegion='primary'"
         self.clusters = config['cluster_name']
         self.dimensions = namedtuple("dimensions", "cost,usage,region,meterid,meter,metercat,metersubcat,resourcegroup,tags,currency")
-        acm_name = f"{config['cache_root']}/cost"
-        self.acm_session = CachedSession(cache_name=acm_name,
-                                    backend='filesystem',
-                                    allowable_methods=('GET','POST'),
-                                    ignored_parameters=['Authorization'])
         retail_name = f"{config['cache_root']}/retail"
         self.retail_session = CachedSession(cache_name=retail_name,
                                             backend='filesystem',
@@ -30,8 +22,8 @@ class azurecost:
                                             allowable_methods=('GET'),
                                             expire_after=172800)
 
-        _az_logger = logging.getLogger('azure.identity')
-        _az_logger.setLevel(logging.ERROR)
+        #_az_logger = logging.getLogger('azure.identity')
+        #_az_logger.setLevel(logging.ERROR)
 
     def get_retail_rate(self, armskuname: str, armregionname: str, spot: bool):
 
@@ -112,19 +104,27 @@ class azurecost:
             if e['category'] == 'nodearray':
                 if e['node'] == 'hpc':
                     use = e['hours']
-                    if 'vm_sizes' not in e:
-                        e['vm_sizes'] = {}
-                    e['vm_sizes'][hpc] = {}
-                    e['vm_sizes'][hpc]['core_hours'] = use
-                    e['vm_sizes'][hpc]['core_count'] = hpc_cores
-                    e['vm_sizes'][hpc]['region'] = 'eastus'
+                    if 'details' not in e:
+                        e['details'] = []
+                    a = {}
+                    a['vm_size'] = hpc
+                    a['hours'] = use
+                    a['core_count'] = hpc_cores
+                    a['region'] = 'eastus'
+                    a['priority'] = 'regular'
+                    a['os'] = 'linux'
+                    e['details'].append(a)
                 elif e['node'] == 'htc':
                     use = e['hours']
-                    if 'vm_sizes' not in e:
-                        e['vm_sizes'] = {}
-                    e['vm_sizes'][htc] = {}
-                    e['vm_sizes'][htc]['core_hours'] = use
-                    e['vm_sizes'][htc]['core_count'] = htc_cores
-                    e['vm_sizes'][htc]['region'] = 'eastus'
+                    if 'details' not in e:
+                        e['details'] = []
+                    a = {}
+                    a['vm_size'] = htc
+                    a['hours'] = use
+                    a['core_count'] = htc_cores
+                    a['region'] = 'eastus'
+                    a['priority'] = 'spot'
+                    a['os'] = 'linux'
+                    e['details'].append(a)
 
         return usage
