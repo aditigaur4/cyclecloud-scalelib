@@ -12,6 +12,7 @@ HPC_SKU = "Standard_F2s_v2"
 HPC_CORE_COUNT = 2
 HTC_SKU = "Standard_F2s_v2"
 HTC_CORE_COUNT = 2
+
 class azurecost:
     def __init__(self, config: dict):
 
@@ -19,7 +20,6 @@ class azurecost:
         self.retail_url = "https://prices.azure.com/api/retail/prices?api-version=2021-10-01-preview&meterRegion='primary'"
         self.clusters = config['cluster_name']
         self.dimensions = namedtuple("dimensions", "cost,usage,region,meterid,meter,metercat,metersubcat,resourcegroup,tags,currency")
-        acm_name = f"{config['cache_root']}/cost"
         retail_name = f"{config['cache_root']}/retail"
         self.retail_session = CachedSession(cache_name=retail_name,
                                             backend='filesystem',
@@ -29,52 +29,97 @@ class azurecost:
 
         #_az_logger = logging.getLogger('azure.identity')
         #_az_logger.setLevel(logging.ERROR)
+
+
         ## If we have ACM data available use azcost format else use retail format.
         ## for nodearray, combine usage data with either azcost or retail format.
         self.DEFAULT_AZCOST_FORMAT="sku_name,region,spot,meter,meterid,metercat,metersubcat,resourcegroup,rate,currency"
         self.RETAIL_FORMAT="sku_name,region,spot,meter,meterid,metercat,rate,currency"
-        self.NODEARRAY_USAGE_FORMAT="nodearray,core_hours"
+        self.NODEARRAY_USAGE_FORMAT="nodearray,core_hours,cost"
+
+        self.az_job_t = namedtuple('az_job_t', self.DEFAULT_AZCOST_FORMAT)
+        self.az_job_retail_t = namedtuple('az_job_retail_t', self.RETAIL_FORMAT)
+        self.az_array_t = namedtuple('az_array_t', (self.NODEARRAY_USAGE_FORMAT + ',' + self.DEFAULT_AZCOST_FORMAT))
+        self.az_array_retail_t = namedtuple('az_array_retail_t', (self.NODEARRAY_USAGE_FORMAT + ',' + self.RETAIL_FORMAT))
 
     def do_meter_lookup(self, sku_name, spot, region):
         """
         check cache storage if we have seen this meter's rate
-        before
+        before. 
         """
         return None
 
-    def check_cost_avail(self, start, end):
+    def check_cost_avail(self, start=None, end=None):
         """
         For a given time period, check if we have
-        cost data available.
+        cost data available. If time period is not
+        specified, check if historical cost data
+        is available to allow us to infer rates.
         """
         return False
 
+    def get_azcost_job_format(self):
+
+        if self.check_cost_avail():
+            return self.az_job_t
+        else:
+            return self.az_job_retail_t
+
     def get_azcost_job(self, sku_name, region, spot):
 
-        fmt = []
+        _fmt = self.get_azcost_job_format()
 
-        if not self.do_meter_lookup(sku_name, region, spot):
-            # We do not have a rate for this meter id, get info from retail.
-            fmt = self.RETAIL_FORMAT.split(',')
-            az_fmt_t = namedtuple('az_fmt_t', fmt)
+        if _fmt.__name__ == 'az_job_retail_t':
             data = self.get_retail_rate(sku_name, region, spot)
-            az_fmt = az_fmt_t(sku_name=sku_name, region=region,spot=spot,meter=data['meterName'],
+            az_fmt = _fmt(sku_name=sku_name, region=region,spot=spot,meter=data['meterName'],
                                 meterid=data['meterId'],metercat=data['serviceName'],
                                 rate=data['retailPrice'], currency=data['currencyCode'])
             return az_fmt
         else:
             pass
 
+    def get_azcost_nodearray_format(self):
+
+        if self.check_cost_avail():
+            return self.az_array_t
+        else:
+            return self.az_array_retail_t
 
     def get_azcost_nodearray(self, start, end):
 
+        def _process_usage_with_retail(az_fmt_t, usage: dict):
+            usage_details = []
+
+            for e in usage[0]['breakdown']:
+                if e['category'] != 'nodearray':
+                    continue
+                array_name = e['node']
+                for a in e['details']:
+                    sku_name = a['vm_size']
+                    region = a['region']
+                    spot = a['priority']
+                    hours = a['hours']
+                    core_count = a['core_count']
+
+                    if self.do_meter_lookup(sku_name=sku_name,region=region,spot=spot):
+                        pass
+                    # use retail data
+                    data = self.get_retail_rate(sku_name=sku_name, region=region, spot=spot)
+                    rate = data['retailPrice']
+                    cost =  (hours/core_count) * rate
+                    array_fmt = az_fmt_t(sku_name=sku_name, region=region,spot=spot,core_hours=hours, cost=cost,
+                                        nodearray=array_name,meterid=data['meterId'],meter=data['meterName'],
+                                        metercat=data['serviceName'], rate=data['retailPrice'], currency=data['currencyCode'])
+                    usage_details.append(array_fmt)
+
+            return usage_details
+
+        usage = self.get_usage(start, end, 'total')
         fmt = []
 
-        if not self.check_cost_avail(start, end):
-            # we do not have cost data available, use retail format.
-            fmt = (self.RETAIL_FORMAT + self.NODEARRAY_USAGE_FORMAT).split(',')
-            az_fmt_t = namedtuple('az_fmt_t', fmt)
-        return
+        _fmt = self.get_azcost_nodearray_format()
+        if _fmt.__name__ == 'az_array_retail_t':
+            return _process_usage_with_retail(_fmt, usage)
 
 
     def get_retail_rate(self, armskuname: str, armregionname: str, spot: bool):
@@ -148,31 +193,32 @@ class azurecost:
         usage = copy.deepcopy(res.json())
 
         #This is a temporary hack to work around CC api for now.
-        for e in usage['usage'][0]['breakdown']:
-            if e['category'] == 'nodearray':
-                if e['node'] == 'hpc':
-                    use = e['hours']
-                    if 'details' not in e:
-                        e['details'] = []
+        for e in usage['usage']:
+            f = e['breakdown']
+            if f['category'] == 'nodearray':
+                if f['node'] == 'hpc':
+                    use = f['hours']
+                    if 'details' not in f:
+                        f['details'] = []
                     a = {}
-                    a['vm_size'] = hpc
+                    a['vm_size'] = HPC_SKU
                     a['hours'] = use
-                    a['core_count'] = hpc_cores
+                    a['core_count'] = HPC_CORE_COUNT
                     a['region'] = 'eastus'
                     a['priority'] = 'regular'
                     a['os'] = 'linux'
-                    e['details'].append(a)
-                elif e['node'] == 'htc':
-                    use = e['hours']
-                    if 'details' not in e:
-                        e['details'] = []
+                    f['details'].append(a)
+                elif f['node'] == 'htc':
+                    use = f['hours']
+                    if 'details' not in f:
+                        f['details'] = []
                     a = {}
-                    a['vm_size'] = htc
+                    a['vm_size'] = HTC_SKU
                     a['hours'] = use
-                    a['core_count'] = htc_cores
+                    a['core_count'] = HTC_CORE_COUNT
                     a['region'] = 'eastus'
                     a['priority'] = 'spot'
                     a['os'] = 'linux'
-                    e['details'].append(a)
+                    f['details'].append(a)
 
         return usage
