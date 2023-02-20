@@ -89,8 +89,8 @@ class azurecost:
 
         def _process_usage_with_retail(az_fmt_t, usage: dict):
             usage_details = []
-
-            for e in usage[0]['breakdown']:
+            print(usage)
+            for e in usage['usage'][0]['breakdown']:
                 if e['category'] != 'nodearray':
                     continue
                 array_name = e['node']
@@ -104,7 +104,7 @@ class azurecost:
                     if self.do_meter_lookup(sku_name=sku_name,region=region,spot=spot):
                         pass
                     # use retail data
-                    data = self.get_retail_rate(sku_name=sku_name, region=region, spot=spot)
+                    data = self.get_retail_rate(armskuname=sku_name, armregionname=region, spot=spot)
                     rate = data['retailPrice']
                     cost =  (hours/core_count) * rate
                     array_fmt = az_fmt_t(sku_name=sku_name, region=region,spot=spot,core_hours=hours, cost=cost,
@@ -150,11 +150,6 @@ class azurecost:
 
             return e
 
-    def test_azure_cost(self):
-
-        log.info("Test azure cost")
-        return self.config
-
     def get_info_from_retail(self, meterId: str):
 
         sku = 'armSkuName'
@@ -175,8 +170,9 @@ class azurecost:
                 sku_list.append((e[sku],e[region]))
         return sku_list
 
-    def get_usage(self, clustername: str, start: str, end: str, granularity: str):
+    def get_usage(self, start: str, end: str, granularity: str):
 
+        clustername = self.config['cluster_name']
         endpoint = f"{self.config['url']}/clusters/{clustername}/usage"
         params = {}
         params['granularity'] = granularity
@@ -194,8 +190,9 @@ class azurecost:
 
         #This is a temporary hack to work around CC api for now.
         for e in usage['usage']:
-            f = e['breakdown']
-            if f['category'] == 'nodearray':
+            for f in e['breakdown']:
+                if f['category'] != 'nodearray':
+                    continue
                 if f['node'] == 'hpc':
                     use = f['hours']
                     if 'details' not in f:
