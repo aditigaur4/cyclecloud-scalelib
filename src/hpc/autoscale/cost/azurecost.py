@@ -1,5 +1,6 @@
 import ast
 import copy
+import csv
 import requests
 import hpc.autoscale.hpclogging as log
 from collections import namedtuple
@@ -85,11 +86,11 @@ class azurecost:
         else:
             return self.az_array_retail_t
 
-    def get_azcost_nodearray(self, start, end):
+    def get_azcost_nodearray(self, fout, start, end):
 
-        def _process_usage_with_retail(az_fmt_t, usage: dict):
-            usage_details = []
-            print(usage)
+        def _process_usage_with_retail(az_fmt_t, fout, usage: dict):
+            row_count = 0
+            writer = csv.writer(fout, delimiter=',')
             for e in usage['usage'][0]['breakdown']:
                 if e['category'] != 'nodearray':
                     continue
@@ -110,17 +111,18 @@ class azurecost:
                     array_fmt = az_fmt_t(sku_name=sku_name, region=region,spot=spot,core_hours=hours, cost=cost,
                                         nodearray=array_name,meterid=data['meterId'],meter=data['meterName'],
                                         metercat=data['serviceName'], rate=data['retailPrice'], currency=data['currencyCode'])
-                    usage_details.append(array_fmt)
-
-            return usage_details
+                    row = []
+                    for f in az_fmt_t._fields:
+                        row.append(array_fmt._asdict()[f])
+                    writer.writerow(row)
+                    row_count += 1
+            return row_count
 
         usage = self.get_usage(start, end, 'total')
         fmt = []
-
         _fmt = self.get_azcost_nodearray_format()
         if _fmt.__name__ == 'az_array_retail_t':
-            return _process_usage_with_retail(_fmt, usage)
-
+            return _process_usage_with_retail(_fmt, fout, usage)
 
     def get_retail_rate(self, armskuname: str, armregionname: str, spot: bool):
 
