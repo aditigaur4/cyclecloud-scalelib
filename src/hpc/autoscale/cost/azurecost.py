@@ -98,10 +98,11 @@ class azurecost:
                 for a in e['details']:
                     sku_name = a['vm_size']
                     region = a['region']
-                    spot = a['priority']
                     hours = a['hours']
                     core_count = a['core_count']
-
+                    spot = False
+                    if a['priority'] == 'Spot':
+                        spot = True
                     if self.do_meter_lookup(sku_name=sku_name,region=region,spot=spot):
                         pass
                     # use retail data
@@ -146,10 +147,10 @@ class azurecost:
             if e['meterName'].__contains__("Low Priority"):
                 continue
 
-            if spot:
-                if e['meterName'].__contains__("Spot"):
+            if e['meterName'].__contains__("Spot"):
+                if spot:
                     return e
-
+                continue
             return e
 
     def get_info_from_retail(self, meterId: str):
