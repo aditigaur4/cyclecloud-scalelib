@@ -176,7 +176,7 @@ class azurecost:
     def get_usage(self, start: str, end: str, granularity: str):
 
         clustername = self.config['cluster_name']
-        endpoint = f"{self.config['url']}/clusters/{clustername}/usage"
+        endpoint = f"{self.config['url']}/clusters/{clustername}/usage?expand=details"
         params = {}
         params['granularity'] = granularity
         params['timeframe'] = 'custom'
@@ -189,36 +189,4 @@ class azurecost:
             log.error(res.reason)
             res.raise_for_status()
 
-        usage = copy.deepcopy(res.json())
-
-        #This is a temporary hack to work around CC api for now.
-        for e in usage['usage']:
-            for f in e['breakdown']:
-                if f['category'] != 'nodearray':
-                    continue
-                if f['node'] == 'hpc':
-                    use = f['hours']
-                    if 'details' not in f:
-                        f['details'] = []
-                    a = {}
-                    a['vm_size'] = HPC_SKU
-                    a['hours'] = use
-                    a['core_count'] = HPC_CORE_COUNT
-                    a['region'] = 'eastus'
-                    a['priority'] = 'regular'
-                    a['os'] = 'linux'
-                    f['details'].append(a)
-                elif f['node'] == 'htc':
-                    use = f['hours']
-                    if 'details' not in f:
-                        f['details'] = []
-                    a = {}
-                    a['vm_size'] = HTC_SKU
-                    a['hours'] = use
-                    a['core_count'] = HTC_CORE_COUNT
-                    a['region'] = 'eastus'
-                    a['priority'] = 'spot'
-                    a['os'] = 'linux'
-                    f['details'].append(a)
-
-        return usage
+        return res.json()
